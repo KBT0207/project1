@@ -1,0 +1,10 @@
+asgiref==3.12.1
+certifi==2026.7.22
+charset-normalizer==3.5.1
+django==6.1.1
+idna==3.20
+-e file:///home/vivek/projects/project1
+python-dotenv==1.2.3
+requests==2.34.2
+sqlparse==0.6.0
+urllib3==2.8.0
