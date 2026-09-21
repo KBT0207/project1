@@ -1,0 +1,173 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp delivery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>WhatsApp delivery</h1>
+      <p class="sub">See which invoices and messages reached your customers.</p>
+    </div>
+    <div class="sending-from">
+      Sending from <strong>{{ active.source }}</strong><br>
+      Phone number ID {{ active.phone_number_id|default:"not set" }}
+    </div>
+  </header>
+
+  <div class="pipeline">
+    {% for step in pipeline %}
+      <a class="step {% if status == step.key %}on{% endif %}" style="--c: var(--{{ step.key }}); --w: {{ step.percent }}%"
+         href="?tab=messages&status={{ step.key }}">
+        <span class="label">{{ step.label }}</span>
+        <span class="count">{{ step.count }}</span>
+        <span class="hint">{{ step.hint }}</span>
+        <span class="bar"><i></i></span>
+      </a>
+    {% endfor %}
+    <a class="step {% if status == 'failed' %}on{% endif %}" style="--c: var(--failed); --w: {{ failed.percent }}%"
+       href="?tab=messages&status=failed">
+      <span class="label">{{ failed.label }}</span>
+      <span class="count">{{ failed.count }}</span>
+      <span class="hint">{{ failed.hint }}</span>
+      <span class="bar"><i></i></span>
+    </a>
+  </div>
+  <p class="pipeline-note">
+    {{ total }} message{{ total|pluralize }} in total. Each message counts under its latest status.
+    {% if status %}<a href="?tab=messages">Show all</a>{% endif %}
+  </p>
+
+  <nav class="tabs">
+    <a class="{% if tab == 'messages' %}on{% endif %}" href="?tab=messages">Messages</a>
+    <a class="{% if tab == 'events' %}on{% endif %}" href="?tab=events">Webhook events</a>
+    <a class="{% if tab == 'connection' %}on{% endif %}" href="?tab=connection">Connection</a>
+  </nav>
+
+  <div class="panel">
+
+  {% if tab == 'messages' %}
+    <form class="filters" method="get">
+      <input type="hidden" name="tab" value="messages">
+      <input type="search" name="q" value="{{ query }}" placeholder="Search phone, invoice number or template">
+      <select name="status" aria-label="Status">
+        <option value="">All statuses</option>
+        {% for step in pipeline %}<option value="{{ step.key }}" {% if status == step.key %}selected{% endif %}>{{ step.label }}</option>{% endfor %}
+        <option value="failed" {% if status == 'failed' %}selected{% endif %}>Failed</option>
+      </select>
+      <button type="submit">Apply filters</button>
+      <span class="spacer"></span>
+      <label class="auto"><input type="checkbox" id="auto"> Refresh every 30 seconds</label>
+    </form>
+
+    {% if messages %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Time</th><th>Customer</th><th>Template</th><th>Reference</th><th>Status</th><th>Message ID</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for m in messages %}
+          <tr>
+            <td class="num">{{ m.created_at|date:"d M, H:i" }}</td>
+            <td class="num">{{ m.to_number }}</td>
+            <td>{{ m.template_name|default:"—" }}</td>
+            <td>{% if m.reference_id %}{{ m.reference_type }} {{ m.reference_id }}{% else %}—{% endif %}</td>
+            <td><span class="pill s-{{ m.status }}">{{ m.status|capfirst }}</span></td>
+            <td class="id" title="{{ m.wa_message_id|default:'' }}">{{ m.wa_message_id|default:"—"|truncatechars:22 }}</td>
+            <td><button type="button" class="quiet" data-toggle>Details</button></td>
+          </tr>
+          <tr class="detail" hidden>
+            <td colspan="7">
+              {% if m.error %}<p class="err">Error: {{ m.error }}</p>{% endif %}
+              <pre>{{ m.pretty_payload }}</pre>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty">
+        <strong>No messages found</strong>
+        {% if status or query %}Try clearing the filters.{% else %}Send one with send_document() or send_template() and it will appear here.{% endif %}
+      </div>
+    {% endif %}
+
+  {% elif tab == 'events' %}
+    {% if events %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Received</th><th>What happened</th><th></th></tr></thead>
+        <tbody>
+          {% for e in events %}
+          <tr>
+            <td class="num">{{ e.received_at|date:"d M, H:i:s" }}</td>
+            <td>{{ e.summary }}</td>
+            <td><button type="button" class="quiet" data-toggle>Details</button></td>
+          </tr>
+          <tr class="detail" hidden><td colspan="3"><pre>{{ e.pretty_payload }}</pre></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty">
+        <strong>No webhook events yet</strong>
+        Meta sends an event here when a message is sent, delivered, read or fails. Set your webhook URL in the Connection tab.
+      </div>
+    {% endif %}
+
+  {% else %}
+    <div class="box">
+      <div>Webhook URL for Meta: <code>{{ webhook_url }}</code></div>
+      <div class="sub">Paste this as the Callback URL in Meta. It must be HTTPS and reachable from the internet.</div>
+    </div>
+
+    {% for c in configs %}
+      <div class="conn">
+        <h3>
+          {{ c.name }}
+          {% if c.is_active %}<span class="pill s-read">Active</span>{% endif %}
+          <a href="{% url 'admin:whatsapp_whatsappconfig_change' c.pk %}">Edit</a>
+        </h3>
+        <dl>
+          <dt>Phone number ID</dt><dd>{{ c.phone_number_id }}</dd>
+          <dt>Access token</dt><dd>{{ c.masked_access_token|default:"Not set" }}</dd>
+          <dt>Verify token</dt><dd>{% if c.verify_token %}Set{% else %}Not set{% endif %}</dd>
+          <dt>App secret</dt><dd>{{ c.masked_app_secret|default:"Not set" }}</dd>
+          <dt>Default template</dt><dd>{{ c.default_template|default:"None" }} ({{ c.default_language }})</dd>
+          <dt>API version</dt><dd>{{ c.api_version }}</dd>
+        </dl>
+      </div>
+    {% empty %}
+      <div class="empty">
+        <strong>No connection saved yet</strong>
+        The app is using values from your .env file.
+        <br><br>
+        <a class="btn" href="{% url 'admin:whatsapp_whatsappconfig_add' %}">Add a connection</a>
+      </div>
+    {% endfor %}
+
+    {% if configs %}
+      <div class="box footer">
+        <a class="btn" href="{% url 'admin:whatsapp_whatsappconfig_add' %}">Add another connection</a>
+        <span class="sub">To switch, open Connections in admin and run "Make the selected connection active".</span>
+      </div>
+    {% endif %}
+  {% endif %}
+
+  </div>
+</div>
+
+<script src="{% static 'js/dashboard.js' %}"></script>
+</body>
+</html>
