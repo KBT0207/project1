@@ -5,11 +5,11 @@ import json
 from django.contrib.admin.views.decorators import staff_member_required
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
-
+from django.shortcuts import render, redirect, get_object_or_404
 from .config import get_config
 from .models import WebhookEvent, WhatsAppConfig, WhatsAppMessage
+from .form import WhatsAppConfigForm
 
 STATUS_RANK = {"accepted": 0, "sent": 1, "delivered": 2, "read": 3}
 
@@ -127,3 +127,49 @@ def dashboard(request):
         "webhook_url": request.build_absolute_uri("/webhook/whatsapp/"),
     }
     return render(request, "whatsapp/dashboard.html", context)
+
+
+@staff_member_required
+def whatsapp_config(request):
+    if request.method == "POST":
+        form = WhatsAppConfigForm(request.POST)
+
+        if form.is_valid():
+            form.save()
+            return redirect("whatsapp_dashboard")
+    else:
+        form = WhatsAppConfigForm()
+
+    return render(
+        request,
+        "whatsapp/whatsapp_config.html",
+        {"form": form},
+    )
+
+@staff_member_required
+def whatsapp_config_edit(request, pk):
+    config = get_object_or_404(WhatsAppConfig, pk=pk)
+    if request.method == 'POST':
+        form = WhatsAppConfigForm(request.POST, instance=config)
+        if form.is_valid():
+            form.save()
+            return redirect('whatsapp_dashboard')
+    else:
+        form = WhatsAppConfigForm(instance=config)
+
+    context = {
+        "config": config,
+        'form':form
+    }
+    return render(
+        request, 
+        "whatsapp/whatsapp_edit.html",
+        context=context
+        )
+
+
+
+def whatsapp_config_delete(request, pk):
+    config = get_object_or_404(WhatsAppConfig, pk=pk)
+    config.delete()
+    return redirect("whatsapp_dashboard")

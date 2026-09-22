@@ -1,0 +1,315 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>WhatsApp Configuration</title>
+
+    <link
+        rel="preconnect"
+        href="https://fonts.googleapis.com"
+    >
+
+    <link
+        rel="preconnect"
+        href="https://fonts.gstatic.com"
+        crossorigin
+    >
+
+    <link
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+        rel="stylesheet"
+    >
+
+    <link
+        rel="stylesheet"
+        href="{% static 'css/whatsapp_config.css' %}"
+    >
+</head>
+
+<body>
+
+<div class="wrap">
+
+    <header>
+        <div>
+            <h1>WhatsApp Configuration</h1>
+
+            <p class="sub">
+                Configure your WhatsApp Business API connection.
+            </p>
+        </div>
+    </header>
+
+
+    <div class="config-panel">
+
+        <form
+            action="{% url 'whatsapp_config' %}"
+            method="POST"
+        >
+
+            {% csrf_token %}
+
+
+            <!-- Connection -->
+
+            <section class="form-section">
+
+                <h2>Connection</h2>
+
+                <p class="section-description">
+                    Basic information for this WhatsApp connection.
+                </p>
+
+
+                <div class="form-grid">
+
+                    <div class="form-group">
+
+                        <label for="{{ form.name.id_for_label }}">
+                            Configuration name
+                        </label>
+
+                        {{ form.name }}
+
+                        {% if form.name.help_text %}
+                            <small class="help-text">
+                                {{ form.name.help_text }}
+                            </small>
+                        {% endif %}
+
+                        {% for error in form.name.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="{{ form.phone_number_id.id_for_label }}">
+                            Phone number ID
+                        </label>
+
+                        {{ form.phone_number_id }}
+
+                        {% for error in form.phone_number_id.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- Authentication -->
+
+            <section class="form-section">
+
+                <h2>Authentication</h2>
+
+                <p class="section-description">
+                    Credentials used to communicate with the WhatsApp API.
+                </p>
+
+
+                <div class="form-grid">
+
+                    <div class="form-group full">
+
+                        <label for="{{ form.access_token.id_for_label }}">
+                            Access token
+                        </label>
+
+                        {{ form.access_token }}
+
+                        <small class="help-text">
+                            Keep this value private.
+                        </small>
+
+                        {% for error in form.access_token.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="{{ form.verify_token.id_for_label }}">
+                            Verify token
+                        </label>
+
+                        {{ form.verify_token }}
+
+                        {% for error in form.verify_token.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="{{ form.app_secret.id_for_label }}">
+                            App secret
+                        </label>
+
+                        {{ form.app_secret }}
+
+                        {% for error in form.app_secret.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- Defaults -->
+
+            <section class="form-section">
+
+                <h2>Defaults</h2>
+
+                <p class="section-description">
+                    Default settings used when sending WhatsApp messages.
+                </p>
+
+
+                <div class="form-grid">
+
+                    <div class="form-group">
+
+                        <label for="{{ form.api_version.id_for_label }}">
+                            API version
+                        </label>
+
+                        {{ form.api_version }}
+
+                        {% for error in form.api_version.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="{{ form.default_language.id_for_label }}">
+                            Default language
+                        </label>
+
+                        {{ form.default_language }}
+
+                        {% for error in form.default_language.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+
+                    <div class="form-group full">
+
+                        <label for="{{ form.default_template.id_for_label }}">
+                            Default template
+                        </label>
+
+                        {{ form.default_template }}
+
+                        {% for error in form.default_template.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- Status -->
+
+            <section class="form-section">
+
+                <h2>Connection status</h2>
+
+                <p class="section-description">
+                    Only one WhatsApp connection can be active at a time.
+                </p>
+
+
+                <div class="checkbox-group">
+
+                    {{ form.is_active }}
+
+                    <div>
+
+                        <label for="{{ form.is_active.id_for_label }}">
+                            Make this connection active
+                        </label>
+
+                        <div class="checkbox-description">
+                            Activating this connection will deactivate
+                            any other WhatsApp connection.
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- Actions -->
+
+            <div class="form-actions">
+
+                <a
+                    href="{% url 'whatsapp_dashboard' %}"
+                    class="btn btn-secondary"
+                >
+                    Cancel
+                </a>
+
+                <button
+                    type="submit"
+                    class="btn-primary"
+                >
+                    Save configuration
+                </button>
+
+            </div>
+
+        </form>
+
+    </div>
+
+</div>
+
+</body>
+</html>

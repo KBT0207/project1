@@ -1,0 +1,527 @@
+:root {
+  --bg: #f2f5f7;
+  --surface: #ffffff;
+  --ink: #17232e;
+  --muted: #62717e;
+  --line: #dbe2e8;
+
+  --brand: #0d6b5b;
+  --brand-hover: #095848;
+
+  --success: #2f9e5c;
+  --danger: #c8402f;
+  --warning: #b7791f;
+
+  --input-bg: #ffffff;
+  --input-focus: rgba(13, 107, 91, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10181f;
+    --surface: #17222b;
+    --ink: #e7edf1;
+    --muted: #93a2ae;
+    --line: #2a3843;
+
+    --brand: #3fb8a0;
+    --brand-hover: #51c8ae;
+
+    --success: #55b879;
+    --danger: #e06455;
+    --warning: #d49a43;
+
+    --input-bg: #10181f;
+    --input-focus: rgba(63, 184, 160, 0.14);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+
+  font-family:
+    "IBM Plex Sans",
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+/* --------------------------------
+   Links / Focus
+-------------------------------- */
+
+a {
+  color: var(--brand);
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+
+/* --------------------------------
+   Main Container
+-------------------------------- */
+
+.wrap {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 28px 20px 60px;
+}
+
+
+/* --------------------------------
+   Header
+-------------------------------- */
+
+header {
+  margin-bottom: 22px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sub {
+  color: var(--muted);
+  margin: 4px 0 0;
+}
+
+
+/* --------------------------------
+   Configuration Card
+-------------------------------- */
+
+.config-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+
+/* --------------------------------
+   Section
+-------------------------------- */
+
+.form-section {
+  padding: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.form-section:last-child {
+  border-bottom: 0;
+}
+
+.form-section h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.section-description {
+  margin: 0 0 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+
+/* --------------------------------
+   Form Grid
+-------------------------------- */
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 20px;
+}
+
+.form-group {
+  min-width: 0;
+}
+
+.form-group.full {
+  grid-column: 1 / -1;
+}
+
+
+/* --------------------------------
+   Labels
+-------------------------------- */
+
+.form-group label {
+  display: block;
+  margin-bottom: 6px;
+
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.required {
+  color: var(--danger);
+}
+
+
+/* --------------------------------
+   Inputs
+-------------------------------- */
+
+input,
+textarea,
+select {
+  width: 100%;
+
+  font: inherit;
+  color: var(--ink);
+
+  background: var(--input-bg);
+
+  border: 1px solid var(--line);
+  border-radius: 5px;
+
+  padding: 9px 11px;
+
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+input {
+  min-height: 38px;
+}
+
+textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+input:hover,
+textarea:hover,
+select:hover {
+  border-color: var(--muted);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+
+  border-color: var(--brand);
+
+  box-shadow:
+    0 0 0 3px var(--input-focus);
+}
+
+
+/* --------------------------------
+   Placeholder
+-------------------------------- */
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+
+/* --------------------------------
+   Help Text
+-------------------------------- */
+
+.help-text {
+  display: block;
+
+  margin-top: 5px;
+
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+
+/* --------------------------------
+   Errors
+-------------------------------- */
+
+.error {
+  margin-top: 5px;
+
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.error-list {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+
+  background: rgba(200, 64, 47, 0.06);
+
+  border: 1px solid rgba(200, 64, 47, 0.25);
+  border-radius: 5px;
+
+  color: var(--danger);
+}
+
+
+/* --------------------------------
+   Checkbox
+-------------------------------- */
+
+.checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  padding: 12px;
+
+  background: var(--bg);
+
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.checkbox-group input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+
+  margin: 0;
+
+  accent-color: var(--brand);
+}
+
+.checkbox-group label {
+  margin: 0;
+  cursor: pointer;
+}
+
+.checkbox-description {
+  margin: 2px 0 0 25px;
+
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+
+/* --------------------------------
+   Sensitive Fields
+-------------------------------- */
+
+.secret-field {
+  position: relative;
+}
+
+.secret-field input {
+  padding-right: 90px;
+}
+
+.secret-note {
+  margin-top: 5px;
+
+  color: var(--muted);
+  font-size: 12px;
+}
+
+
+/* --------------------------------
+   Footer / Actions
+-------------------------------- */
+
+.form-actions {
+  display: flex;
+
+  align-items: center;
+  justify-content: flex-end;
+
+  gap: 10px;
+
+  padding: 16px 20px;
+
+  background: var(--bg);
+
+  border-top: 1px solid var(--line);
+}
+
+
+/* --------------------------------
+   Buttons
+-------------------------------- */
+
+button,
+.btn {
+  font: inherit;
+
+  border: 0;
+  border-radius: 5px;
+
+  padding: 8px 14px;
+
+  cursor: pointer;
+
+  text-decoration: none;
+
+  display: inline-block;
+}
+
+.btn-primary,
+button[type="submit"] {
+  background: var(--brand);
+  color: #fff;
+}
+
+.btn-primary:hover,
+button[type="submit"]:hover {
+  background: var(--brand-hover);
+}
+
+.btn-secondary {
+  background: transparent;
+
+  color: var(--brand);
+
+  border: 1px solid var(--line);
+}
+
+.btn-secondary:hover {
+  background: var(--bg);
+}
+
+
+/* --------------------------------
+   Configuration Status
+-------------------------------- */
+
+.status-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 12px 14px;
+
+  margin-bottom: 20px;
+
+  background: var(--bg);
+
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+
+  border-radius: 50%;
+
+  background: var(--muted);
+}
+
+.status-dot.active {
+  background: var(--success);
+}
+
+.status-text {
+  font-size: 14px;
+}
+
+.status-text strong {
+  font-weight: 500;
+}
+
+
+/* --------------------------------
+   Info Box
+-------------------------------- */
+
+.info-box {
+  padding: 12px 14px;
+
+  margin-bottom: 20px;
+
+  background: rgba(13, 107, 91, 0.05);
+
+  border: 1px solid rgba(13, 107, 91, 0.18);
+
+  border-radius: 5px;
+
+  color: var(--muted);
+
+  font-size: 13px;
+}
+
+.info-box strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+
+/* --------------------------------
+   Django Form Error State
+-------------------------------- */
+
+input.is-invalid,
+textarea.is-invalid,
+select.is-invalid {
+  border-color: var(--danger);
+}
+
+input.is-invalid:focus,
+textarea.is-invalid:focus,
+select.is-invalid:focus {
+  box-shadow:
+    0 0 0 3px rgba(200, 64, 47, 0.12);
+}
+
+
+/* --------------------------------
+   Responsive
+-------------------------------- */
+
+@media (max-width: 700px) {
+
+  .wrap {
+    padding: 20px 14px 40px;
+  }
+
+  h1 {
+    font-size: 23px;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .form-group.full {
+    grid-column: auto;
+  }
+
+  .form-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .form-actions button,
+  .form-actions .btn {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+
