@@ -2,14 +2,17 @@ import hashlib
 import hmac
 import json
 
-from django.contrib.admin.views.decorators import staff_member_required
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.shortcuts import render, redirect, get_object_or_404
 from .config import get_config
 from .models import WebhookEvent, WhatsAppConfig, WhatsAppMessage
-from .form import WhatsAppConfigForm
+from .forms import WhatsAppConfigForm
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
+from django.contrib.auth.forms import AuthenticationForm
+
 
 STATUS_RANK = {"accepted": 0, "sent": 1, "delivered": 2, "read": 3}
 
@@ -80,7 +83,7 @@ def whatsapp_webhook(request):
     return JsonResponse({"ok": True})
 
 
-@staff_member_required
+@login_required(login_url="login")
 def dashboard(request):
     tab = request.GET.get("tab", "messages")
     status = request.GET.get("status", "")
@@ -129,7 +132,7 @@ def dashboard(request):
     return render(request, "whatsapp/dashboard.html", context)
 
 
-@staff_member_required
+@login_required(login_url="login")
 def whatsapp_config(request):
     if request.method == "POST":
         form = WhatsAppConfigForm(request.POST)
@@ -146,7 +149,7 @@ def whatsapp_config(request):
         {"form": form},
     )
 
-@staff_member_required
+@login_required(login_url="login")
 def whatsapp_config_edit(request, pk):
     config = get_object_or_404(WhatsAppConfig, pk=pk)
     if request.method == 'POST':
@@ -168,8 +171,29 @@ def whatsapp_config_edit(request, pk):
         )
 
 
-
+@login_required(login_url="login")
 def whatsapp_config_delete(request, pk):
     config = get_object_or_404(WhatsAppConfig, pk=pk)
     config.delete()
     return redirect("whatsapp_dashboard")
+
+def login(request):
+    if request.user.is_authenticated:
+        return redirect("whatsapp_dashboard")
+
+    if request.method == "POST":
+        form = AuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            user = form.get_user()
+            auth_login(request, user)
+            next_url = request.GET.get("next", "whatsapp_dashboard")
+            return redirect(next_url)
+    else:
+        form = AuthenticationForm()
+
+    return render(request, "login.html", {"form": form})
+
+
+def logout(request):
+    auth_logout(request)
+    return redirect("login")

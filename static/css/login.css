@@ -1,0 +1,310 @@
+:root {
+    --bg: #f2f5f7;
+    --surface: #ffffff;
+    --ink: #17232e;
+    --muted: #62717e;
+    --line: #dbe2e8;
+
+    --brand: #0d6b5b;
+    --brand-hover: #095848;
+
+    --success: #2f9e5c;
+    --danger: #c8402f;
+
+    --input-bg: #ffffff;
+    --input-focus: rgba(13, 107, 91, 0.12);
+}
+
+
+/* --------------------------------
+   Dark Mode
+-------------------------------- */
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #10181f;
+        --surface: #17222b;
+        --ink: #e7edf1;
+        --muted: #93a2ae;
+        --line: #2a3843;
+
+        --brand: #3fb8a0;
+        --brand-hover: #51c8ae;
+
+        --success: #55b879;
+        --danger: #e06455;
+
+        --input-bg: #10181f;
+        --input-focus: rgba(63, 184, 160, 0.14);
+    }
+}
+
+
+/* --------------------------------
+   Reset
+-------------------------------- */
+
+* {
+    box-sizing: border-box;
+}
+
+
+/* --------------------------------
+   Body
+-------------------------------- */
+
+body {
+    margin: 0;
+    min-height: 100vh;
+
+    background: var(--bg);
+    color: var(--ink);
+
+    font-family:
+        "IBM Plex Sans",
+        system-ui,
+        -apple-system,
+        "Segoe UI",
+        sans-serif;
+
+    font-size: 15px;
+    line-height: 1.5;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
+/* --------------------------------
+   Login Container
+-------------------------------- */
+
+.login-container {
+    width: 100%;
+    max-width: 420px;
+
+    padding: 20px;
+}
+
+
+/* --------------------------------
+   Login Card
+-------------------------------- */
+
+.login-card {
+    background: var(--surface);
+
+    border: 1px solid var(--line);
+    border-radius: 6px;
+
+    overflow: hidden;
+}
+
+
+/* --------------------------------
+   Header
+-------------------------------- */
+
+.login-header {
+    padding: 24px 24px 10px;
+}
+
+.login-header h1 {
+    margin: 0;
+
+    font-size: 26px;
+    font-weight: 600;
+
+    letter-spacing: -0.01em;
+}
+
+.login-header p {
+    margin: 4px 0 0;
+
+    color: var(--muted);
+}
+
+
+/* --------------------------------
+   Form
+-------------------------------- */
+
+.login-form {
+    padding: 20px 24px 24px;
+}
+
+.form-group {
+    margin-bottom: 18px;
+}
+
+
+/* --------------------------------
+   Labels
+-------------------------------- */
+
+.form-group label {
+    display: block;
+
+    margin-bottom: 6px;
+
+    color: var(--ink);
+
+    font-size: 14px;
+    font-weight: 500;
+}
+
+
+/* --------------------------------
+   Inputs
+-------------------------------- */
+
+input {
+    width: 100%;
+    min-height: 40px;
+
+    font: inherit;
+    color: var(--ink);
+
+    background: var(--input-bg);
+
+    border: 1px solid var(--line);
+    border-radius: 5px;
+
+    padding: 9px 11px;
+
+    transition:
+        border-color 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+input:hover {
+    border-color: var(--muted);
+}
+
+input:focus {
+    outline: none;
+
+    border-color: var(--brand);
+
+    box-shadow:
+        0 0 0 3px var(--input-focus);
+}
+
+input::placeholder {
+    color: var(--muted);
+    opacity: 0.75;
+}
+
+
+/* --------------------------------
+   Login Button
+-------------------------------- */
+
+.login-button {
+    width: 100%;
+
+    font: inherit;
+    font-weight: 500;
+
+    border: 0;
+    border-radius: 5px;
+
+    padding: 10px 14px;
+
+    cursor: pointer;
+
+    background: var(--brand);
+    color: #ffffff;
+
+    transition:
+        background 0.15s ease;
+}
+
+.login-button:hover {
+    background: var(--brand-hover);
+}
+
+
+/* --------------------------------
+   Footer
+-------------------------------- */
+
+.login-footer {
+    padding: 16px 24px;
+
+    background: var(--bg);
+
+    border-top: 1px solid var(--line);
+
+    text-align: center;
+
+    color: var(--muted);
+
+    font-size: 13px;
+}
+
+.login-footer a {
+    color: var(--brand);
+
+    text-decoration: none;
+}
+
+.login-footer a:hover {
+    text-decoration: underline;
+}
+
+
+/* --------------------------------
+   Error
+-------------------------------- */
+
+.error {
+    margin-bottom: 16px;
+    padding: 10px 12px;
+
+    background: rgba(200, 64, 47, 0.06);
+
+    border: 1px solid rgba(200, 64, 47, 0.25);
+    border-radius: 5px;
+
+    color: var(--danger);
+
+    font-size: 13px;
+}
+
+
+/* --------------------------------
+   Focus
+-------------------------------- */
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+}
+
+
+/* --------------------------------
+   Responsive
+-------------------------------- */
+
+@media (max-width: 500px) {
+
+    .login-container {
+        padding: 14px;
+    }
+
+    .login-header {
+        padding: 20px 20px 8px;
+    }
+
+    .login-form {
+        padding: 18px 20px 20px;
+    }
+
+    .login-footer {
+        padding: 14px 20px;
+    }
+}
