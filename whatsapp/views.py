@@ -169,6 +169,8 @@ def busy_send(request):
         mobile      customer number
         message     text that contains the PDF link (or use `link`)
         link        (optional) direct PDF link
+        file        (optional) the PDF itself, sent as a file upload (multipart POST)
+                    or as the raw request body (body starting with %PDF)
         name        (optional) customer name for template variable {{1}}
         amount      (optional) invoice amount for template variable {{2}}
         invoice_no  (optional) for reference on the dashboard
@@ -192,7 +194,10 @@ def busy_send(request):
             "remote_addr": request.META.get("REMOTE_ADDR", ""),
             "forwarded_for": request.META.get("HTTP_X_FORWARDED_FOR", ""),
             "user_agent": request.META.get("HTTP_USER_AGENT", ""),
-            "raw_body": scrub(raw.decode("utf-8", "replace")[:2000], secret),
+            "query_string": scrub(request.META.get("QUERY_STRING", "")[:2000], secret),
+            "files": {name: f"{f.name}, {f.size} bytes" for name, f in request.FILES.items()},
+            "body_is_pdf": raw.startswith(b"%PDF"),
+            "raw_body": "(PDF file)" if raw.startswith(b"%PDF") else scrub(raw.decode("utf-8", "replace")[:2000], secret),
         }
     )
 
@@ -213,11 +218,21 @@ def busy_send(request):
     found = URL_RE.search(message)
     link = params.get("link") or (found.group(0) if found else "")
 
-    if not to or not link:
+    # The PDF can arrive as an uploaded file, as the raw body, or as a link
+    pdf_bytes = None
+    pdf_source = ""
+    if request.FILES:
+        uploaded = next(iter(request.FILES.values()))
+        pdf_bytes, pdf_source = uploaded.read(), f"uploaded file {uploaded.name}"
+    elif raw.startswith(b"%PDF"):
+        pdf_bytes, pdf_source = raw, "raw request body"
+
+    if not to or not (pdf_bytes or link):
         return finish(
-            {"error": "mobile and a PDF link are required"},
+            {"error": "mobile and a PDF (file or link) are required"},
             400,
-            f"mobile={'ok' if to else 'missing'}, link={'ok' if link else 'missing'}",
+            f"mobile={'ok' if to else 'missing'}, file={'ok' if pdf_bytes else 'missing'}, "
+            f"link={'ok' if link else 'missing'}",
         )
 
     # Template test_templates needs two body variables: {{1}} name, {{2}} amount.
@@ -230,21 +245,23 @@ def busy_send(request):
         (params.get("amount") or (amount_match.group(1) if amount_match else "") or "-").split()
     )
 
-    # Download the PDF, upload it to Meta, then send by media id
+    # Get the PDF (download it if we only have a link), upload it to Meta, send by media id
     try:
-        pdf = requests.get(link, timeout=30)
-        pdf.raise_for_status()
-        if not pdf.content.startswith(b"%PDF"):
-            return finish({"error": "link is not a direct PDF"}, 400, f"link={link}")
+        if not pdf_bytes:
+            pdf = requests.get(link, timeout=30)
+            pdf.raise_for_status()
+            pdf_bytes, pdf_source = pdf.content, f"link {link}"
+        if not pdf_bytes.startswith(b"%PDF"):
+            return finish({"error": "not a PDF"}, 400, f"{pdf_source} is not a direct PDF")
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(pdf.content)
+            tmp.write(pdf_bytes)
         try:
             media_id = services.upload_media(tmp.name)
         finally:
             os.remove(tmp.name)
     except Exception as exc:
-        return finish({"error": f"pdf fetch/upload failed: {exc}"}, 502, f"link={link}")
+        return finish({"error": f"pdf fetch/upload failed: {exc}"}, 502, pdf_source or f"link={link}")
 
     msg = services.send_template(
         to,
@@ -258,7 +275,7 @@ def busy_send(request):
     return finish(
         {"status": msg.status, "id": msg.wa_message_id, "error": msg.error},
         200 if msg.status != "failed" else 502,
-        f"to={to}, name={name}, amount={amount}",
+        f"to={to}, name={name}, amount={amount}, pdf from {pdf_source}",
     )
 
 
