@@ -438,6 +438,9 @@ def _debug_rows(kind="all", query=""):
             "note": result.get("note") or result.get("error", ""),
             "fields": fields,
             "query_string": p.get("query_string", ""),
+            "method": p.get("method", ""),
+            "files": p.get("files", {}),
+            "body_is_pdf": p.get("body_is_pdf", False),
             "pretty": event.pretty_payload,
         }
 
@@ -470,6 +473,9 @@ def _debug_rows(kind="all", query=""):
         g["full_message"] = "".join(c["message"] for c in calls)
         found = URL_RE.search(g["full_message"])
         g["link"] = found.group(0) if found else ""
+        g["has_file"] = any(c["files"] or c["body_is_pdf"] for c in calls)
+        g["param_names"] = sorted({name for c in calls for name in c["fields"]})
+        g["methods"] = ", ".join(sorted({c["method"] for c in calls if c["method"]}))
         statuses = [c["status"] for c in calls if c["status"]]
         ok_calls = [c for c in calls if c["status"] and 200 <= c["status"] < 300]
         g["ok"] = bool(ok_calls)

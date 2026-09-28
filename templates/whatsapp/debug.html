@@ -52,7 +52,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Time</th><th>Source</th><th>Mobile</th><th>Calls</th><th>Message (all pieces joined)</th><th>PDF link</th><th>Result</th><th></th></tr>
+          <tr><th>Time</th><th>Source</th><th>Mobile</th><th>Calls</th><th>Message (all pieces joined)</th><th>PDF (file or link)</th><th>Result</th><th></th></tr>
         </thead>
         <tbody>
           {% for r in rows %}
@@ -62,7 +62,7 @@
             <td class="num">{{ r.mobile|default:"-" }}</td>
             <td class="num">{{ r.calls|length }}</td>
             <td style="white-space: pre-wrap; word-break: break-word; max-width: 380px;">{{ r.full_message|default:"-"|truncatechars:200 }}</td>
-            <td>{% if r.link %}<span class="pill s-read">Found</span>{% else %}<span class="pill s-failed">None</span>{% endif %}</td>
+            <td>{% if r.has_file %}<span class="pill s-read">File</span>{% elif r.link %}<span class="pill s-read">Link</span>{% else %}<span class="pill s-failed">None</span>{% endif %}</td>
             <td>
               {% if r.status %}
                 <span class="pill {% if r.failed %}s-failed{% else %}s-read{% endif %}">HTTP {{ r.status }}</span>
@@ -83,7 +83,10 @@
                  &nbsp; <strong>Calls:</strong> {{ r.calls|length }}
                  &nbsp; <strong>First call:</strong> {{ r.received_at|date:"H:i:s" }}
                  &nbsp; <strong>Last call:</strong> {{ r.last_at|date:"H:i:s" }}</p>
-              <p><strong>PDF link found:</strong> {% if r.link %}{{ r.link }}{% else %}none in the message{% endif %}</p>
+              <p><strong>Request type:</strong> {{ r.methods|default:"-" }}
+                 &nbsp; <strong>Parameter names received:</strong> {{ r.param_names|join:", "|default:"-" }}</p>
+              <p><strong>PDF file received:</strong> {% if r.has_file %}Yes{% else %}No (no uploaded file and no PDF body in any call){% endif %}
+                 &nbsp; <strong>PDF link found:</strong> {% if r.link %}{{ r.link }}{% else %}none in the message{% endif %}</p>
 
               <p><strong>Full message (all pieces joined):</strong></p>
               <pre style="white-space: pre-wrap; word-break: break-word;">{{ r.full_message|default:"(empty)" }}</pre>
@@ -112,6 +115,9 @@
                             {% endfor %}
                           </tbody>
                         </table>
+                        <p><strong>Request:</strong> {{ c.method|default:"-" }}
+                           &nbsp; <strong>Uploaded files:</strong> {% if c.files %}{{ c.files }}{% else %}none{% endif %}
+                           &nbsp; <strong>Body is PDF:</strong> {% if c.body_is_pdf %}yes{% else %}no{% endif %}</p>
                         <p><strong>Query string:</strong> {{ c.query_string|default:"-" }}</p>
                         <pre>{{ c.pretty }}</pre>
                       </details>
