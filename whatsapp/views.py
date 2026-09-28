@@ -1,3 +1,4 @@
+import functools
 import hashlib
 import hmac
 import json
@@ -31,6 +32,7 @@ PIPELINE = [
 ]
 
 URL_RE = re.compile(r"https?://\S+")
+AMOUNT_RE = re.compile(r"(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d+)?)", re.IGNORECASE)
 
 
 def valid_signature(request, app_secret):
@@ -96,53 +98,144 @@ def whatsapp_webhook(request):
 # BUSY integration
 # ---------------------------------------------------------------------------
 
-def normalize_mobile(raw):
-    """Return digits only, with 91 added for 10-digit Indian numbers."""
+DEBUG_SENSITIVE = {"key", "password", "token", "access_token", "secret", "authorization"}
+
+
+def log_request(view):
+    """Save what any request contains on the Webhook events tab, then run the view."""
+    @functools.wraps(view)
+    def wrapper(request, *args, **kwargs):
+        raw = request.body  # read before request.POST
+        WebhookEvent.objects.create(payload={
+            "debug": True,
+            "method": request.method,
+            "path": request.path,
+            "query": {k: ("••••" if k.lower() in DEBUG_SENSITIVE else v)
+                      for k, v in request.GET.dict().items()},
+            "form": {k: ("••••" if k.lower() in DEBUG_SENSITIVE else v)
+                     for k, v in request.POST.dict().items()},
+            "raw_body": raw.decode("utf-8", "replace")[:5000],
+            "headers": {k: v for k, v in request.headers.items()
+                        if k.lower() not in ("authorization", "cookie")},
+            "remote_addr": request.META.get("REMOTE_ADDR", ""),
+        })
+        return view(request, *args, **kwargs)
+    return wrapper
+
+
+@csrf_exempt
+@log_request
+def debug_echo(request):
+    """Catch-all test endpoint. Point any system here to see what it sends. Remove when done."""
+    return JsonResponse({"received": True})
+
+
+SENSITIVE_KEYS = {"key", "password", "token", "access_token", "secret"}
+
+
+def normalize_mobile(raw, country_code="91"):
+    """Return digits only, with the country code added to 10-digit numbers."""
     digits = re.sub(r"\D", "", raw or "")
     digits = digits.lstrip("0")
     if len(digits) == 10:
-        digits = "91" + digits
+        digits = country_code + digits
     return digits
+
+
+def read_params(request, raw):
+    """Merge query string, form body and JSON body into one dict."""
+    params = request.GET.dict()
+    params.update(request.POST.dict())
+    if raw and "json" in (request.content_type or ""):
+        try:
+            body = json.loads(raw)
+        except ValueError:
+            body = None
+        if isinstance(body, dict):
+            params.update({k: str(v) for k, v in body.items()})
+    return params
+
+
+def scrub(text, secret):
+    """Hide the secret key before anything is stored in the log."""
+    return text.replace(secret, "••••") if secret else text
 
 
 @csrf_exempt
 def busy_send(request):
     """
-    Called by BUSY. Expects (GET or POST):
-        key         shared secret (BUSY_API_KEY in .env)
+    Called by BUSY. Accepts GET or POST (query string, form or JSON):
+        key         BUSY API key saved on the active connection
         mobile      customer number
         message     text that contains the PDF link (or use `link`)
         link        (optional) direct PDF link
+        name        (optional) customer name for template variable {{1}}
+        amount      (optional) invoice amount for template variable {{2}}
         invoice_no  (optional) for reference on the dashboard
         filename    (optional) name shown in WhatsApp
-    """
-    data = request.GET if request.method == "GET" else request.POST
 
-    # Log exactly what BUSY sends so you can inspect it on the dashboard "events" tab
-    WebhookEvent.objects.create(
-        payload={"busy": dict(data.items()), "method": request.method}
+    Every call is saved on the dashboard "Webhook events" tab: what BUSY sent
+    (key hidden), where it came from, and what we answered.
+    """
+    raw = request.body  # read first, before touching request.POST
+    params = read_params(request, raw)
+    secret = params.get("key", "")
+
+    event = WebhookEvent.objects.create(
+        payload={
+            "busy": {
+                k: (WhatsAppConfig.mask(v) if k.lower() in SENSITIVE_KEYS else v)
+                for k, v in params.items()
+            },
+            "method": request.method,
+            "content_type": request.content_type,
+            "remote_addr": request.META.get("REMOTE_ADDR", ""),
+            "forwarded_for": request.META.get("HTTP_X_FORWARDED_FOR", ""),
+            "user_agent": request.META.get("HTTP_USER_AGENT", ""),
+            "raw_body": scrub(raw.decode("utf-8", "replace")[:2000], secret),
+        }
     )
 
-    api_key = os.getenv("BUSY_API_KEY", "")
-    if not api_key or not hmac.compare_digest(data.get("key", ""), api_key):
-        return JsonResponse({"error": "unauthorized"}, status=403)
+    def finish(body, status, note=""):
+        event.payload["result"] = {"status": status, "note": note, **body}
+        event.save(update_fields=["payload"])
+        return JsonResponse(body, status=status)
 
-    to = normalize_mobile(data.get("mobile"))
-    message = data.get("message", "")
+    cfg = get_config()
+    api_key = cfg["busy_api_key"]
+    if not api_key:
+        return finish({"error": "unauthorized"}, 403, "Busy api key is not set on the active connection")
+    if not hmac.compare_digest(secret.encode(), api_key.encode()):
+        return finish({"error": "unauthorized"}, 403, "key sent by BUSY does not match the saved key")
+
+    to = normalize_mobile(params.get("mobile"), cfg["default_country_code"])
+    message = params.get("message", "")
     found = URL_RE.search(message)
-    link = data.get("link") or (found.group(0) if found else "")
-    # WhatsApp template params cannot contain newlines
-    text = " ".join(URL_RE.sub("", message).split()) or "your invoice"
+    link = params.get("link") or (found.group(0) if found else "")
 
     if not to or not link:
-        return JsonResponse({"error": "mobile and a PDF link are required"}, status=400)
+        return finish(
+            {"error": "mobile and a PDF link are required"},
+            400,
+            f"mobile={'ok' if to else 'missing'}, link={'ok' if link else 'missing'}",
+        )
+
+    # Template test_templates needs two body variables: {{1}} name, {{2}} amount.
+    # Use explicit `name` / `amount` params if BUSY sends them, otherwise try to
+    # read the amount from the message text. WhatsApp params cannot be empty or
+    # contain newlines.
+    amount_match = AMOUNT_RE.search(message)
+    name = " ".join((params.get("name") or "Customer").split())
+    amount = " ".join(
+        (params.get("amount") or (amount_match.group(1) if amount_match else "") or "-").split()
+    )
 
     # Download the PDF, upload it to Meta, then send by media id
     try:
         pdf = requests.get(link, timeout=30)
         pdf.raise_for_status()
         if not pdf.content.startswith(b"%PDF"):
-            return JsonResponse({"error": "link is not a direct PDF"}, status=400)
+            return finish({"error": "link is not a direct PDF"}, 400, f"link={link}")
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(pdf.content)
@@ -151,20 +244,21 @@ def busy_send(request):
         finally:
             os.remove(tmp.name)
     except Exception as exc:
-        return JsonResponse({"error": f"pdf fetch/upload failed: {exc}"}, status=502)
+        return finish({"error": f"pdf fetch/upload failed: {exc}"}, 502, f"link={link}")
 
     msg = services.send_template(
         to,
         components=[
-            services.doc_header(media_id=media_id, filename=data.get("filename", "invoice.pdf")),
-            services.body(text),
+            services.doc_header(media_id=media_id, filename=params.get("filename", "invoice.pdf")),
+            services.body(name, amount),
         ],
         reference_type="busy",
-        reference_id=data.get("invoice_no", ""),
+        reference_id=params.get("invoice_no", ""),
     )
-    return JsonResponse(
+    return finish(
         {"status": msg.status, "id": msg.wa_message_id, "error": msg.error},
-        status=200 if msg.status != "failed" else 502,
+        200 if msg.status != "failed" else 502,
+        f"to={to}, name={name}, amount={amount}",
     )
 
 
@@ -279,3 +373,74 @@ def login(request):
 def logout(request):
     auth_logout(request)
     return redirect("login")
+
+
+
+# ---------------------------------------------------------------------------
+# Debug page: everything BUSY (or /api/debug/) sent us
+# ---------------------------------------------------------------------------
+
+def _debug_rows(kind="all", query=""):
+    rows = []
+    for event in WebhookEvent.objects.all()[:300]:
+        p = event.payload
+        if "busy" in p:
+            source, fields = "BUSY", p["busy"]
+        elif p.get("debug"):
+            source, fields = "Debug", {**p.get("query", {}), **p.get("form", {})}
+        else:
+            continue
+
+        result = p.get("result", {})
+        status = result.get("status")
+        row = {
+            "id": event.pk,
+            "received_at": event.received_at,
+            "source": source,
+            "method": p.get("method", ""),
+            "path": p.get("path") or ("/api/busy/send/" if source == "BUSY" else ""),
+            "mobile": fields.get("mobile", ""),
+            "message": str(fields.get("message", "")),
+            "status": status,
+            "failed": isinstance(status, int) and status >= 400,
+            "note": result.get("note") or result.get("error", ""),
+            "fields": fields,
+            "remote_addr": p.get("remote_addr", ""),
+            "pretty": event.pretty_payload,
+        }
+
+        if kind == "busy" and source != "BUSY":
+            continue
+        if kind == "debug" and source != "Debug":
+            continue
+        if kind == "errors" and not row["failed"]:
+            continue
+        if query and query.lower() not in f"{row['mobile']} {row['message']} {row['note']}".lower():
+            continue
+        rows.append(row)
+    return rows[:100]
+
+
+@login_required(login_url="login")
+def debug_page(request):
+    kind = request.GET.get("kind", "all")
+    query = request.GET.get("q", "").strip()
+    context = {
+        "kind": kind,
+        "query": query,
+        "rows": _debug_rows(kind, query),
+        "busy_url": request.build_absolute_uri("/api/busy/send/"),
+        "debug_url": request.build_absolute_uri("/api/debug/"),
+    }
+    return render(request, "whatsapp/debug.html", context)
+
+
+@login_required(login_url="login")
+def debug_clear(request):
+    if request.method == "POST":
+        ids = [
+            e.pk for e in WebhookEvent.objects.all()
+            if "busy" in e.payload or e.payload.get("debug")
+        ]
+        WebhookEvent.objects.filter(pk__in=ids).delete()
+    return redirect("whatsapp_debug")

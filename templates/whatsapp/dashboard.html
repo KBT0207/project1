@@ -22,6 +22,7 @@
         Sending from <strong>{{ active.source }}</strong><br>
         Phone number ID {{ active.phone_number_id|default:"not set" }}
       </div>
+      <a href="{% url 'whatsapp_debug' %}" class="btn-logout">Debug</a>
       <a href="{% url 'logout' %}" class="btn-logout">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
@@ -132,7 +133,7 @@
     {% else %}
       <div class="empty">
         <strong>No webhook events yet</strong>
-        Meta sends an event here when a message is sent, delivered, read or fails. Set your webhook URL in the Connection tab.
+        Meta sends an event here when a message is sent, delivered, read or fails. Calls from BUSY also appear here. Set your webhook URL in the Connection tab.
       </div>
     {% endif %}
 
@@ -140,6 +141,11 @@
     <div class="box">
       <div>Webhook URL for Meta: <code>{{ webhook_url }}</code></div>
       <div class="sub">Paste this as the Callback URL in Meta. It must be HTTPS and reachable from the internet.</div>
+    </div>
+
+    <div class="box">
+      <div>BUSY API URL: <code>{{ busy_url }}?key=&amp;mobile=&amp;message=</code></div>
+      <div class="sub">Paste this in the WhatsApp/SMS API box in BUSY. Every call BUSY makes is listed under Webhook events.</div>
     </div>
 
     {% for c in configs %}
@@ -156,10 +162,13 @@
         </h3>
         <dl>
           <dt>Phone number ID</dt><dd>{{ c.phone_number_id }}</dd>
+          <dt>WABA ID</dt><dd>{{ c.waba_id|default:"Not set" }}</dd>
           <dt>Access token</dt><dd>{{ c.masked_access_token|default:"Not set" }}</dd>
           <dt>Verify token</dt><dd>{% if c.verify_token %}Set{% else %}Not set{% endif %}</dd>
           <dt>App secret</dt><dd>{{ c.masked_app_secret|default:"Not set" }}</dd>
+          <dt>BUSY API key</dt><dd>{{ c.masked_busy_api_key|default:"Not set" }}</dd>
           <dt>Default template</dt><dd>{{ c.default_template|default:"None" }} ({{ c.default_language }})</dd>
+          <dt>Country code</dt><dd>{{ c.default_country_code }}</dd>
           <dt>API version</dt><dd>{{ c.api_version }}</dd>
         </dl>
       </div>

@@ -103,6 +103,27 @@
 
                     </div>
 
+
+                    <div class="form-group">
+
+                        <label for="{{ form.waba_id.id_for_label }}">
+                            WhatsApp Business Account ID (WABA ID)
+                        </label>
+
+                        {{ form.waba_id }}
+
+                        <small class="help-text">
+                            Meta: WhatsApp &gt; API Setup.
+                        </small>
+
+                        {% for error in form.waba_id.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
                 </div>
 
             </section>
@@ -175,6 +196,27 @@
 
                     </div>
 
+
+                    <div class="form-group">
+
+                        <label for="{{ form.busy_api_key.id_for_label }}">
+                            BUSY API key
+                        </label>
+
+                        {{ form.busy_api_key }}
+
+                        <small class="help-text">
+                            Make up a long random string. Use the same value as key= in BUSY.
+                        </small>
+
+                        {% for error in form.busy_api_key.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
                 </div>
 
             </section>
@@ -236,6 +278,27 @@
                         {{ form.default_template }}
 
                         {% for error in form.default_template.errors %}
+                            <div class="error">
+                                {{ error }}
+                            </div>
+                        {% endfor %}
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="{{ form.default_country_code.id_for_label }}">
+                            Default country code
+                        </label>
+
+                        {{ form.default_country_code }}
+
+                        <small class="help-text">
+                            Added to 10-digit mobile numbers, for example 91.
+                        </small>
+
+                        {% for error in form.default_country_code.errors %}
                             <div class="error">
                                 {{ error }}
                             </div>

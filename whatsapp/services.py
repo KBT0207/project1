@@ -93,3 +93,19 @@ def doc_header(link=None, media_id=None, filename="invoice.pdf"):
 
 def body(*values):
     return {"type": "body", "parameters": [{"type": "text", "text": str(v)} for v in values]}
+
+
+def template_status(template=None):
+    """Look up the template in Meta using the WABA ID. Returns Meta's raw response."""
+    cfg = get_config()
+    template = template or cfg["default_template"]
+    try:
+        response = requests.get(
+            f"https://graph.facebook.com/{cfg['api_version']}/{cfg['waba_id']}/message_templates",
+            headers=_auth(cfg),
+            params={"name": template},
+            timeout=30,
+        )
+        return response.json()
+    except (requests.RequestException, ValueError) as exc:
+        return {"error": {"message": str(exc)}}
