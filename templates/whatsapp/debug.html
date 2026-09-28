@@ -15,7 +15,7 @@
   <header style="display: flex; justify-content: space-between; align-items: flex-start;">
     <div>
       <h1>Debug: incoming API calls</h1>
-      <p class="sub">See exactly what BUSY (or any system) sent: mobile, message, every field and the result.</p>
+      <p class="sub">One row per invoice. Click Details to see everything BUSY sent.</p>
     </div>
     <div style="display: flex; align-items: center; gap: 16px;">
       <a href="{% url 'whatsapp_dashboard' %}" class="btn-logout">Back to dashboard</a>
@@ -26,13 +26,17 @@
   <div class="panel">
 
     <div class="box">
-      <div>BUSY URL: <code>{{ busy_url }}?key=&amp;mobile=&amp;message=</code></div>
+      <div>BUSY URL: <code>{{ busy_url }}?key=KEYTOKEN&amp;mobile=MOBILETOKEN&amp;message=MSGTOKEN</code></div>
       <div>Test URL (logs only, sends nothing): <code>{{ debug_url }}</code></div>
-      <div class="sub">Point any system at the test URL, make one call, then refresh this page.</div>
+      <div class="sub">
+        BUSY cuts a long message into pieces of 160 characters and calls the API once per piece.
+        Calls for the same mobile that arrive within 15 seconds are joined into one row here,
+        and the pieces are put back together in the order they arrived.
+      </div>
     </div>
 
     <form class="filters" method="get">
-      <input type="search" name="q" value="{{ query }}" placeholder="Search mobile, message or error">
+      <input type="search" name="q" value="{{ query }}" placeholder="Search mobile, message or error (try: http)">
       <select name="kind" aria-label="Type">
         <option value="all" {% if kind == 'all' %}selected{% endif %}>All calls</option>
         <option value="busy" {% if kind == 'busy' %}selected{% endif %}>BUSY only</option>
@@ -48,7 +52,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Time</th><th>Source</th><th>Mobile</th><th>Message</th><th>Result</th><th></th></tr>
+          <tr><th>Time</th><th>Source</th><th>Mobile</th><th>Calls</th><th>Message (all pieces joined)</th><th>PDF link</th><th>Result</th><th></th></tr>
         </thead>
         <tbody>
           {% for r in rows %}
@@ -56,33 +60,66 @@
             <td class="num">{{ r.received_at|date:"d M, H:i:s" }}</td>
             <td>{{ r.source }} {{ r.method }}</td>
             <td class="num">{{ r.mobile|default:"-" }}</td>
-            <td style="white-space: pre-wrap; word-break: break-word; max-width: 420px;">{{ r.message|default:"-"|truncatechars:300 }}</td>
+            <td class="num">{{ r.calls|length }}</td>
+            <td style="white-space: pre-wrap; word-break: break-word; max-width: 380px;">{{ r.full_message|default:"-"|truncatechars:200 }}</td>
+            <td>{% if r.link %}<span class="pill s-read">Found</span>{% else %}<span class="pill s-failed">None</span>{% endif %}</td>
             <td>
               {% if r.status %}
                 <span class="pill {% if r.failed %}s-failed{% else %}s-read{% endif %}">HTTP {{ r.status }}</span>
               {% else %}
                 <span class="pill s-accepted">Logged</span>
               {% endif %}
-              {% if r.note %}<div class="sub">{{ r.note }}</div>{% endif %}
+              {% if r.note %}<div class="sub">{{ r.note|truncatechars:160 }}</div>{% endif %}
             </td>
             <td><button type="button" class="quiet" data-toggle>Details</button></td>
           </tr>
           <tr class="detail" hidden>
-            <td colspan="6">
-              <p><strong>Path:</strong> {{ r.path|default:"-" }} &nbsp; <strong>From IP:</strong> {{ r.remote_addr|default:"-" }}</p>
-              <p><strong>Fields received</strong> (name and value):</p>
+            <td colspan="8">
+              <p><strong>Path:</strong> {{ r.path|default:"-" }}
+                 &nbsp; <strong>From IP:</strong> {{ r.remote_addr|default:"-" }}
+                 &nbsp; <strong>Public IP:</strong> {{ r.forwarded_for|default:"-" }}
+                 &nbsp; <strong>Client:</strong> {{ r.user_agent|default:"-" }}</p>
+              <p><strong>Mobile:</strong> {{ r.mobile|default:"-" }}
+                 &nbsp; <strong>Calls:</strong> {{ r.calls|length }}
+                 &nbsp; <strong>First call:</strong> {{ r.received_at|date:"H:i:s" }}
+                 &nbsp; <strong>Last call:</strong> {{ r.last_at|date:"H:i:s" }}</p>
+              <p><strong>PDF link found:</strong> {% if r.link %}{{ r.link }}{% else %}none in the message{% endif %}</p>
+
+              <p><strong>Full message (all pieces joined):</strong></p>
+              <pre style="white-space: pre-wrap; word-break: break-word;">{{ r.full_message|default:"(empty)" }}</pre>
+
+              <p><strong>Each call:</strong></p>
               <table>
-                <thead><tr><th>Name</th><th>Value</th></tr></thead>
+                <thead><tr><th>#</th><th>Time</th><th>Message piece</th><th>Result</th><th>Raw</th></tr></thead>
                 <tbody>
-                  {% for name, value in r.fields.items %}
-                  <tr><td class="num">{{ name }}</td><td style="white-space: pre-wrap; word-break: break-word;">{{ value }}</td></tr>
-                  {% empty %}
-                  <tr><td colspan="2">No fields were received.</td></tr>
+                  {% for c in r.calls %}
+                  <tr>
+                    <td class="num">{{ forloop.counter }}</td>
+                    <td class="num">{{ c.time|date:"H:i:s" }}</td>
+                    <td style="white-space: pre-wrap; word-break: break-word; max-width: 380px;">{{ c.message|default:"-" }}</td>
+                    <td>
+                      {% if c.status %}<span class="pill {% if c.status >= 400 %}s-failed{% else %}s-read{% endif %}">HTTP {{ c.status }}</span>{% endif %}
+                      <div class="sub">{{ c.note }}</div>
+                    </td>
+                    <td>
+                      <details>
+                        <summary>Show</summary>
+                        <p><strong>Fields (name and value):</strong></p>
+                        <table>
+                          <tbody>
+                            {% for name, value in c.fields.items %}
+                            <tr><td class="num">{{ name }}</td><td style="white-space: pre-wrap; word-break: break-word;">{{ value }}</td></tr>
+                            {% endfor %}
+                          </tbody>
+                        </table>
+                        <p><strong>Query string:</strong> {{ c.query_string|default:"-" }}</p>
+                        <pre>{{ c.pretty }}</pre>
+                      </details>
+                    </td>
+                  </tr>
                   {% endfor %}
                 </tbody>
               </table>
-              <p><strong>Full request and result:</strong></p>
-              <pre>{{ r.pretty }}</pre>
             </td>
           </tr>
           {% endfor %}

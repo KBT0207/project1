@@ -1,4 +1,5 @@
 import functools
+from datetime import timedelta
 import hashlib
 import hmac
 import json
@@ -166,7 +167,7 @@ def busy_send(request):
     """
     Called by BUSY. Accepts GET or POST (query string, form or JSON):
         key         BUSY API key saved on the active connection
-        mobile      customer number
+        mobile      customer number (several allowed, separated by ; or ,)
         message     text that contains the PDF link (or use `link`)
         link        (optional) direct PDF link
         file        (optional) the PDF itself, sent as a file upload (multipart POST)
@@ -202,7 +203,7 @@ def busy_send(request):
     )
 
     def finish(body, status, note=""):
-        event.payload["result"] = {"status": status, "note": note, **body}
+        event.payload["result"] = {**body, "status": status, "note": note}
         event.save(update_fields=["payload"])
         return JsonResponse(body, status=status)
 
@@ -213,7 +214,12 @@ def busy_send(request):
     if not hmac.compare_digest(secret.encode(), api_key.encode()):
         return finish({"error": "unauthorized"}, 403, "key sent by BUSY does not match the saved key")
 
-    to = normalize_mobile(params.get("mobile"), cfg["default_country_code"])
+    # BUSY can send several numbers in one call, for example 9137860167;8601248212
+    numbers = []
+    for part in re.split(r"[;,]", params.get("mobile", "")):
+        number = normalize_mobile(part, cfg["default_country_code"])
+        if number and number not in numbers:
+            numbers.append(number)
     message = params.get("message", "")
     found = URL_RE.search(message)
     link = params.get("link") or (found.group(0) if found else "")
@@ -227,11 +233,11 @@ def busy_send(request):
     elif raw.startswith(b"%PDF"):
         pdf_bytes, pdf_source = raw, "raw request body"
 
-    if not to or not (pdf_bytes or link):
+    if not numbers or not (pdf_bytes or link):
         return finish(
             {"error": "mobile and a PDF (file or link) are required"},
             400,
-            f"mobile={'ok' if to else 'missing'}, file={'ok' if pdf_bytes else 'missing'}, "
+            f"mobile={'ok' if numbers else 'missing'}, file={'ok' if pdf_bytes else 'missing'}, "
             f"link={'ok' if link else 'missing'}",
         )
 
@@ -263,20 +269,24 @@ def busy_send(request):
     except Exception as exc:
         return finish({"error": f"pdf fetch/upload failed: {exc}"}, 502, pdf_source or f"link={link}")
 
-    msg = services.send_template(
-        to,
-        components=[
-            services.doc_header(media_id=media_id, filename=params.get("filename", "invoice.pdf")),
-            services.body(name, amount),
-        ],
-        reference_type="busy",
-        reference_id=params.get("invoice_no", ""),
-    )
-    return finish(
-        {"status": msg.status, "id": msg.wa_message_id, "error": msg.error},
-        200 if msg.status != "failed" else 502,
-        f"to={to}, name={name}, amount={amount}, pdf from {pdf_source}",
-    )
+    results = []
+    for to in numbers:
+        msg = services.send_template(
+            to,
+            components=[
+                services.doc_header(media_id=media_id, filename=params.get("filename", "invoice.pdf")),
+                services.body(name, amount),
+            ],
+            reference_type="busy",
+            reference_id=params.get("invoice_no", ""),
+        )
+        results.append({"to": to, "status": msg.status, "id": msg.wa_message_id, "error": msg.error})
+
+    all_failed = all(r["status"] == "failed" for r in results)
+    note = "; ".join(
+        f"{r['to']}: {r['status']}{' - ' + r['error'] if r['error'] else ''}" for r in results
+    ) + f" | name={name}, amount={amount}, pdf from {pdf_source}"
+    return finish({"results": results}, 502 if all_failed else 200, note)
 
 
 # ---------------------------------------------------------------------------
@@ -397,9 +407,20 @@ def logout(request):
 # Debug page: everything BUSY (or /api/debug/) sent us
 # ---------------------------------------------------------------------------
 
+GROUP_GAP = timedelta(seconds=15)  # BUSY calls closer together than this belong to one invoice
+
+
 def _debug_rows(kind="all", query=""):
-    rows = []
-    for event in WebhookEvent.objects.all()[:300]:
+    """
+    One row per invoice. BUSY cuts a long message into 160-character pieces and
+    makes one API call per piece, so calls from the same mobile that arrive
+    within a few seconds of each other are joined into one row.
+    """
+    events = list(WebhookEvent.objects.all()[:500])
+    events.reverse()  # oldest first, so pieces are joined in the order they arrived
+
+    groups, open_groups = [], {}
+    for event in events:
         p = event.payload
         if "busy" in p:
             source, fields = "BUSY", p["busy"]
@@ -410,31 +431,63 @@ def _debug_rows(kind="all", query=""):
 
         result = p.get("result", {})
         status = result.get("status")
-        row = {
-            "id": event.pk,
-            "received_at": event.received_at,
-            "source": source,
-            "method": p.get("method", ""),
-            "path": p.get("path") or ("/api/busy/send/" if source == "BUSY" else ""),
-            "mobile": fields.get("mobile", ""),
+        call = {
+            "time": event.received_at,
             "message": str(fields.get("message", "")),
-            "status": status,
-            "failed": isinstance(status, int) and status >= 400,
+            "status": status if isinstance(status, int) else None,
             "note": result.get("note") or result.get("error", ""),
             "fields": fields,
-            "remote_addr": p.get("remote_addr", ""),
+            "query_string": p.get("query_string", ""),
             "pretty": event.pretty_payload,
         }
 
-        if kind == "busy" and source != "BUSY":
+        mobile = str(fields.get("mobile", ""))
+        key = (source, mobile)
+        group = open_groups.get(key) if source == "BUSY" else None
+        if group is None or event.received_at - group["last_at"] > GROUP_GAP:
+            group = {
+                "id": event.pk,
+                "received_at": event.received_at,
+                "last_at": event.received_at,
+                "source": source,
+                "method": p.get("method", ""),
+                "path": p.get("path") or ("/api/busy/send/" if source == "BUSY" else ""),
+                "mobile": mobile,
+                "remote_addr": p.get("remote_addr", ""),
+                "forwarded_for": p.get("forwarded_for", ""),
+                "user_agent": p.get("user_agent", ""),
+                "calls": [],
+            }
+            groups.append(group)
+            if source == "BUSY":
+                open_groups[key] = group
+        group["calls"].append(call)
+        group["last_at"] = event.received_at
+
+    rows = []
+    for g in groups:
+        calls = g["calls"]
+        g["full_message"] = "".join(c["message"] for c in calls)
+        found = URL_RE.search(g["full_message"])
+        g["link"] = found.group(0) if found else ""
+        statuses = [c["status"] for c in calls if c["status"]]
+        ok_calls = [c for c in calls if c["status"] and 200 <= c["status"] < 300]
+        g["ok"] = bool(ok_calls)
+        g["failed"] = bool(statuses) and not ok_calls
+        g["status"] = 200 if ok_calls else (max(statuses) if statuses else None)
+        g["note"] = (ok_calls[0] if ok_calls else calls[-1])["note"]
+
+        if kind == "busy" and g["source"] != "BUSY":
             continue
-        if kind == "debug" and source != "Debug":
+        if kind == "debug" and g["source"] != "Debug":
             continue
-        if kind == "errors" and not row["failed"]:
+        if kind == "errors" and not g["failed"]:
             continue
-        if query and query.lower() not in f"{row['mobile']} {row['message']} {row['note']}".lower():
+        if query and query.lower() not in f"{g['mobile']} {g['full_message']} {g['note']}".lower():
             continue
-        rows.append(row)
+        rows.append(g)
+
+    rows.reverse()  # newest first
     return rows[:100]
 
 
