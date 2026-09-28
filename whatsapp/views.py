@@ -1,17 +1,24 @@
 import hashlib
 import hmac
 import json
+import os
+import re
+import tempfile
 
+import requests
+from django.contrib.auth import login as auth_login
+from django.contrib.auth import logout as auth_logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import AuthenticationForm
 from django.db.models import Count, Q
 from django.http import HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_exempt
-from django.shortcuts import render, redirect, get_object_or_404
+
+from . import services
 from .config import get_config
-from .models import WebhookEvent, WhatsAppConfig, WhatsAppMessage
 from .forms import WhatsAppConfigForm
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth import authenticate, login as auth_login, logout as auth_logout
-from django.contrib.auth.forms import AuthenticationForm
+from .models import WebhookEvent, WhatsAppConfig, WhatsAppMessage
 
 
 STATUS_RANK = {"accepted": 0, "sent": 1, "delivered": 2, "read": 3}
@@ -22,6 +29,8 @@ PIPELINE = [
     ("delivered", "Delivered", "On the customer's phone"),
     ("read", "Read", "Customer opened it"),
 ]
+
+URL_RE = re.compile(r"https?://\S+")
 
 
 def valid_signature(request, app_secret):
@@ -83,6 +92,86 @@ def whatsapp_webhook(request):
     return JsonResponse({"ok": True})
 
 
+# ---------------------------------------------------------------------------
+# BUSY integration
+# ---------------------------------------------------------------------------
+
+def normalize_mobile(raw):
+    """Return digits only, with 91 added for 10-digit Indian numbers."""
+    digits = re.sub(r"\D", "", raw or "")
+    digits = digits.lstrip("0")
+    if len(digits) == 10:
+        digits = "91" + digits
+    return digits
+
+
+@csrf_exempt
+def busy_send(request):
+    """
+    Called by BUSY. Expects (GET or POST):
+        key         shared secret (BUSY_API_KEY in .env)
+        mobile      customer number
+        message     text that contains the PDF link (or use `link`)
+        link        (optional) direct PDF link
+        invoice_no  (optional) for reference on the dashboard
+        filename    (optional) name shown in WhatsApp
+    """
+    data = request.GET if request.method == "GET" else request.POST
+
+    # Log exactly what BUSY sends so you can inspect it on the dashboard "events" tab
+    WebhookEvent.objects.create(
+        payload={"busy": dict(data.items()), "method": request.method}
+    )
+
+    api_key = os.getenv("BUSY_API_KEY", "")
+    if not api_key or not hmac.compare_digest(data.get("key", ""), api_key):
+        return JsonResponse({"error": "unauthorized"}, status=403)
+
+    to = normalize_mobile(data.get("mobile"))
+    message = data.get("message", "")
+    found = URL_RE.search(message)
+    link = data.get("link") or (found.group(0) if found else "")
+    # WhatsApp template params cannot contain newlines
+    text = " ".join(URL_RE.sub("", message).split()) or "your invoice"
+
+    if not to or not link:
+        return JsonResponse({"error": "mobile and a PDF link are required"}, status=400)
+
+    # Download the PDF, upload it to Meta, then send by media id
+    try:
+        pdf = requests.get(link, timeout=30)
+        pdf.raise_for_status()
+        if not pdf.content.startswith(b"%PDF"):
+            return JsonResponse({"error": "link is not a direct PDF"}, status=400)
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(pdf.content)
+        try:
+            media_id = services.upload_media(tmp.name)
+        finally:
+            os.remove(tmp.name)
+    except Exception as exc:
+        return JsonResponse({"error": f"pdf fetch/upload failed: {exc}"}, status=502)
+
+    msg = services.send_template(
+        to,
+        components=[
+            services.doc_header(media_id=media_id, filename=data.get("filename", "invoice.pdf")),
+            services.body(text),
+        ],
+        reference_type="busy",
+        reference_id=data.get("invoice_no", ""),
+    )
+    return JsonResponse(
+        {"status": msg.status, "id": msg.wa_message_id, "error": msg.error},
+        status=200 if msg.status != "failed" else 502,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dashboard and config
+# ---------------------------------------------------------------------------
+
 @login_required(login_url="login")
 def dashboard(request):
     tab = request.GET.get("tab", "messages")
@@ -128,6 +217,7 @@ def dashboard(request):
         "configs": WhatsAppConfig.objects.all().order_by("-is_active", "name"),
         "active": get_config(),
         "webhook_url": request.build_absolute_uri("/webhook/whatsapp/"),
+        "busy_url": request.build_absolute_uri("/api/busy/send/"),
     }
     return render(request, "whatsapp/dashboard.html", context)
 
@@ -136,39 +226,31 @@ def dashboard(request):
 def whatsapp_config(request):
     if request.method == "POST":
         form = WhatsAppConfigForm(request.POST)
-
         if form.is_valid():
             form.save()
             return redirect("whatsapp_dashboard")
     else:
         form = WhatsAppConfigForm()
 
-    return render(
-        request,
-        "whatsapp/whatsapp_config.html",
-        {"form": form},
-    )
+    return render(request, "whatsapp/whatsapp_config.html", {"form": form})
+
 
 @login_required(login_url="login")
 def whatsapp_config_edit(request, pk):
     config = get_object_or_404(WhatsAppConfig, pk=pk)
-    if request.method == 'POST':
+    if request.method == "POST":
         form = WhatsAppConfigForm(request.POST, instance=config)
         if form.is_valid():
             form.save()
-            return redirect('whatsapp_dashboard')
+            return redirect("whatsapp_dashboard")
     else:
         form = WhatsAppConfigForm(instance=config)
 
-    context = {
-        "config": config,
-        'form':form
-    }
     return render(
-        request, 
+        request,
         "whatsapp/whatsapp_edit.html",
-        context=context
-        )
+        {"config": config, "form": form},
+    )
 
 
 @login_required(login_url="login")
@@ -177,6 +259,7 @@ def whatsapp_config_delete(request, pk):
     config.delete()
     return redirect("whatsapp_dashboard")
 
+
 def login(request):
     if request.user.is_authenticated:
         return redirect("whatsapp_dashboard")
@@ -184,8 +267,7 @@ def login(request):
     if request.method == "POST":
         form = AuthenticationForm(request, data=request.POST)
         if form.is_valid():
-            user = form.get_user()
-            auth_login(request, user)
+            auth_login(request, form.get_user())
             next_url = request.GET.get("next", "whatsapp_dashboard")
             return redirect(next_url)
     else:
