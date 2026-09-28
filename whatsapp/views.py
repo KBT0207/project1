@@ -32,8 +32,50 @@ PIPELINE = [
     ("read", "Read", "Customer opened it"),
 ]
 
-URL_RE = re.compile(r"https?://\S+")
+# Matches links with or without http(s)://. BUSY sends links like files.busy.in/?A1QXklmRy
+URL_RE = re.compile(r"(?:https?://|\bwww\.|\bfiles\.busy\.in)\S+", re.IGNORECASE)
+PDF_HREF_RE = re.compile(r"""(?:href|src|url)\s*[=:]\s*["']?([^"'\s>]+\.pdf[^"'\s>]*)""", re.IGNORECASE)
 AMOUNT_RE = re.compile(r"(?:Rs\.?|INR|₹)\s*([\d,]+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def clean_link(url):
+    """Add https:// if BUSY sent the link without it, and strip trailing punctuation."""
+    url = (url or "").strip().rstrip(".,;)'\"")
+    if url and not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    return url
+
+
+def download_pdf(link):
+    """
+    Download a PDF from a link. Returns (pdf_bytes, source_note, error_note).
+    Handles redirects. If the link opens a web page instead of a PDF, looks in
+    the page for a .pdf address and tries that once.
+    """
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(link, timeout=30, allow_redirects=True, headers=headers)
+    response.raise_for_status()
+    content = response.content
+
+    if content.startswith(b"%PDF"):
+        return content, f"link {link}", ""
+
+    # Not a PDF. If it is a web page, look for a PDF address inside it.
+    text = content[:200000].decode("utf-8", "replace")
+    match = PDF_HREF_RE.search(text)
+    if match:
+        from urllib.parse import urljoin
+        pdf_url = urljoin(response.url, match.group(1))
+        second = requests.get(pdf_url, timeout=30, allow_redirects=True, headers=headers)
+        second.raise_for_status()
+        if second.content.startswith(b"%PDF"):
+            return second.content, f"link {link} -> {pdf_url}", ""
+
+    ctype = response.headers.get("Content-Type", "?")
+    return None, f"link {link}", (
+        f"link returned {ctype}, final URL {response.url}, "
+        f"starts with {content[:80]!r}"
+    )
 
 
 def valid_signature(request, app_secret):
@@ -222,7 +264,7 @@ def busy_send(request):
             numbers.append(number)
     message = params.get("message", "")
     found = URL_RE.search(message)
-    link = params.get("link") or (found.group(0) if found else "")
+    link = clean_link(params.get("link") or (found.group(0) if found else ""))
 
     # The PDF can arrive as an uploaded file, as the raw body, or as a link
     pdf_bytes = None
@@ -254,9 +296,9 @@ def busy_send(request):
     # Get the PDF (download it if we only have a link), upload it to Meta, send by media id
     try:
         if not pdf_bytes:
-            pdf = requests.get(link, timeout=30)
-            pdf.raise_for_status()
-            pdf_bytes, pdf_source = pdf.content, f"link {link}"
+            pdf_bytes, pdf_source, problem = download_pdf(link)
+            if not pdf_bytes:
+                return finish({"error": "not a PDF"}, 400, problem)
         if not pdf_bytes.startswith(b"%PDF"):
             return finish({"error": "not a PDF"}, 400, f"{pdf_source} is not a direct PDF")
 
@@ -472,7 +514,7 @@ def _debug_rows(kind="all", query=""):
         calls = g["calls"]
         g["full_message"] = "".join(c["message"] for c in calls)
         found = URL_RE.search(g["full_message"])
-        g["link"] = found.group(0) if found else ""
+        g["link"] = clean_link(found.group(0)) if found else ""
         g["has_file"] = any(c["files"] or c["body_is_pdf"] for c in calls)
         g["param_names"] = sorted({name for c in calls for name in c["fields"]})
         g["methods"] = ", ".join(sorted({c["method"] for c in calls if c["method"]}))
