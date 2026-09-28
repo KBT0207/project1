@@ -46,15 +46,53 @@ def clean_link(url):
     return url
 
 
+def fetch_url(url, params=None, extra_headers=None):
+    """
+    GET a URL. Tries a direct connection first (ignoring any HTTP_PROXY/HTTPS_PROXY
+    environment variables), then falls back to the environment proxy. This avoids
+    "Tunnel connection failed: 403 Forbidden" when the proxy blocks the site.
+    """
+    headers = {"User-Agent": "Mozilla/5.0", **(extra_headers or {})}
+    errors = []
+    for use_env_proxy in (False, True):
+        session = requests.Session()
+        session.trust_env = use_env_proxy
+        try:
+            response = session.get(url, params=params, timeout=30, allow_redirects=True, headers=headers)
+            response.raise_for_status()
+            return response
+        except requests.ConnectionError as exc:  # includes ProxyError and timeouts to connect
+            errors.append(f"{'via env proxy' if use_env_proxy else 'direct'}: {exc}")
+        finally:
+            session.close()
+    raise RuntimeError(" | ".join(errors))
+
+
 def download_pdf(link):
     """
     Download a PDF from a link. Returns (pdf_bytes, source_note, error_note).
     Handles redirects. If the link opens a web page instead of a PDF, looks in
     the page for a .pdf address and tries that once.
     """
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(link, timeout=30, allow_redirects=True, headers=headers)
-    response.raise_for_status()
+    # If PDF_RELAY_URL is set (environment variable), ask the relay server to download
+    # the PDF for us. Use this when THIS server cannot reach files.busy.in.
+    relay = os.getenv("PDF_RELAY_URL", "").strip()
+    if relay:
+        relay_key = get_config()["busy_api_key"]
+        relayed = fetch_url(relay, params={"url": link}, extra_headers={"X-Relay-Key": relay_key})
+        if relayed.content.startswith(b"%PDF"):
+            return relayed.content, f"relay {relay} for {link}", ""
+        return None, f"relay {relay} for {link}", (
+            f"relay returned {relayed.headers.get('Content-Type', '?')}, "
+            f"starts with {relayed.content[:80]!r}"
+        )
+
+    return download_pdf_direct(link)
+
+
+def download_pdf_direct(link):
+    """Download straight from the link (used by the relay server, or when no relay is set)."""
+    response = fetch_url(link)
     content = response.content
 
     if content.startswith(b"%PDF"):
@@ -66,8 +104,7 @@ def download_pdf(link):
     if match:
         from urllib.parse import urljoin
         pdf_url = urljoin(response.url, match.group(1))
-        second = requests.get(pdf_url, timeout=30, allow_redirects=True, headers=headers)
-        second.raise_for_status()
+        second = fetch_url(pdf_url)
         if second.content.startswith(b"%PDF"):
             return second.content, f"link {link} -> {pdf_url}", ""
 
@@ -288,26 +325,37 @@ def busy_send(request):
     # read the amount from the message text. WhatsApp params cannot be empty or
     # contain newlines.
     amount_match = AMOUNT_RE.search(message)
-    name = " ".join((params.get("name") or "Customer").split())
+    dear = re.search(r"Dear\s+'([^']+)'", message)
+    name = " ".join((params.get("name") or (dear.group(1) if dear else "") or "Customer").split())
     amount = " ".join(
         (params.get("amount") or (amount_match.group(1) if amount_match else "") or "-").split()
     )
 
-    # Get the PDF (download it if we only have a link), upload it to Meta, send by media id
+    # Get the PDF (download it if we only have a link), upload it to Meta, send by media id.
+    # If THIS server cannot reach the link (blocked network or proxy), fall back to giving
+    # the link to Meta, whose servers download the PDF themselves.
+    media_id = None
+    header_link = None
     try:
         if not pdf_bytes:
-            pdf_bytes, pdf_source, problem = download_pdf(link)
-            if not pdf_bytes:
-                return finish({"error": "not a PDF"}, 400, problem)
-        if not pdf_bytes.startswith(b"%PDF"):
-            return finish({"error": "not a PDF"}, 400, f"{pdf_source} is not a direct PDF")
+            try:
+                pdf_bytes, pdf_source, problem = download_pdf(link)
+            except RuntimeError as exc:  # could not connect to the link from this server
+                header_link = link
+                pdf_source = f"link {link} sent to Meta as a link (this server could not download it: {exc})"
+            else:
+                if not pdf_bytes:
+                    return finish({"error": "not a PDF"}, 400, problem)
 
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(pdf_bytes)
-        try:
-            media_id = services.upload_media(tmp.name)
-        finally:
-            os.remove(tmp.name)
+        if pdf_bytes:
+            if not pdf_bytes.startswith(b"%PDF"):
+                return finish({"error": "not a PDF"}, 400, f"{pdf_source} is not a direct PDF")
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(pdf_bytes)
+            try:
+                media_id = services.upload_media(tmp.name)
+            finally:
+                os.remove(tmp.name)
     except Exception as exc:
         return finish({"error": f"pdf fetch/upload failed: {exc}"}, 502, pdf_source or f"link={link}")
 
@@ -316,7 +364,7 @@ def busy_send(request):
         msg = services.send_template(
             to,
             components=[
-                services.doc_header(media_id=media_id, filename=params.get("filename", "invoice.pdf")),
+                services.doc_header(link=header_link, media_id=media_id, filename=params.get("filename", "invoice.pdf")),
                 services.body(name, amount),
             ],
             reference_type="busy",
@@ -329,6 +377,38 @@ def busy_send(request):
         f"{r['to']}: {r['status']}{' - ' + r['error'] if r['error'] else ''}" for r in results
     ) + f" | name={name}, amount={amount}, pdf from {pdf_source}"
     return finish({"results": results}, 502 if all_failed else 200, note)
+
+
+ALLOWED_PDF_HOSTS = ("files.busy.in",)
+
+
+@csrf_exempt
+def pdf_relay(request):
+    """
+    Run this on a server that CAN reach files.busy.in.
+    GET /api/busy/pdf-relay/?url=https://files.busy.in/?XXXX  with header X-Relay-Key: <BUSY API key>
+    Returns the PDF bytes. Only files.busy.in links are allowed.
+    """
+    from urllib.parse import urlparse
+
+    cfg = get_config()
+    api_key = cfg["busy_api_key"]
+    sent_key = request.headers.get("X-Relay-Key", "")
+    if not api_key or not hmac.compare_digest(sent_key.encode(), api_key.encode()):
+        return JsonResponse({"error": "unauthorized"}, status=403)
+
+    url = clean_link(request.GET.get("url", ""))
+    host = (urlparse(url).hostname or "").lower()
+    if host not in ALLOWED_PDF_HOSTS:
+        return JsonResponse({"error": "host not allowed"}, status=400)
+
+    try:
+        pdf_bytes, _source, problem = download_pdf_direct(url)
+    except Exception as exc:
+        return JsonResponse({"error": f"download failed: {exc}"}, status=502)
+    if not pdf_bytes:
+        return JsonResponse({"error": "not a PDF", "detail": problem}, status=400)
+    return HttpResponse(pdf_bytes, content_type="application/pdf")
 
 
 # ---------------------------------------------------------------------------
